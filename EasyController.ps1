@@ -37,7 +37,11 @@ function Write-StageProgress {
         if ($line.Length -ge $windowWidth) {
             $line = $line.Substring(0, $windowWidth - 1)
         }
-        Write-Host $line -ForegroundColor DarkCyan
+        $originalLeft = [Console]::CursorLeft
+        $originalTop = [Console]::CursorTop
+        [Console]::SetCursorPosition(0, [Console]::WindowHeight - 1)
+        [Console]::Write($line.PadRight($windowWidth - 1))
+        [Console]::SetCursorPosition($originalLeft, $originalTop)
     }
     catch {
         Write-Host "[$percent%] $Activity - $Status" -ForegroundColor DarkCyan
@@ -45,6 +49,16 @@ function Write-StageProgress {
 }
 
 function Clear-StageProgress {
+    try {
+        $windowWidth = [Console]::WindowWidth
+        $originalLeft = [Console]::CursorLeft
+        $originalTop = [Console]::CursorTop
+        [Console]::SetCursorPosition(0, [Console]::WindowHeight - 1)
+        [Console]::Write((' ' * ($windowWidth - 1)))
+        [Console]::SetCursorPosition($originalLeft, $originalTop)
+    }
+    catch {
+    }
     $script:ProgressState = $null
 }
 
@@ -54,8 +68,7 @@ function Invoke-RequiredCommand {
         [Parameter(Mandatory)] [AllowEmptyString()] [string[]] $Arguments
     )
 
-    $hasProgress = $null -ne $script:ProgressState
-    if ($hasProgress) {
+    if ($null -ne $script:ProgressState) {
         Clear-StageProgress
     }
 
@@ -382,6 +395,7 @@ function Invoke-Setup {
     $total = 3
     try {
         Write-StageProgress 1 $total "EC セットアップ" "必要なツールを確認しています..."
+        Clear-StageProgress
         Install-RequiredTools
 
         Write-StageProgress 2 $total "EC セットアップ" "リポジトリ設定を準備しています..."
@@ -390,6 +404,7 @@ function Invoke-Setup {
         }
 
         Write-StageProgress 3 $total "EC セットアップ" "ユーザー設定とリポジトリを準備しています..."
+    Clear-StageProgress
         Initialize-ECRepository
         Clear-StageProgress
         Write-Host "`nセットアップが完了しました。" -ForegroundColor Green
