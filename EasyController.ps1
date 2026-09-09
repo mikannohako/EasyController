@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $script:DefaultRepositoryUrl = "https://github.com/mikannohako/EasyController.git"
 $script:ConfigPath = Join-Path $PSScriptRoot "config.ini"
-$script:ProgressState = $null
+$script:SetupMarkerPath = Join-Path $PSScriptRoot ".setup-completed"
 
 function Write-ECHeader {
     Clear-Host
@@ -21,45 +21,10 @@ function Write-StageProgress {
         [Parameter(Mandatory)] [string] $Status
     )
 
-    $percent = [math]::Round(($Current / $Total) * 100)
-    $script:ProgressState = @{
-        Current = $Current
-        Total = $Total
-        Activity = $Activity
-        Status = $Status
-    }
-    try {
-        $windowWidth = [Console]::WindowWidth
-        $barWidth = [math]::Max(10, [math]::Min(40, $windowWidth - 42))
-        $filledWidth = [math]::Round(($percent / 100) * $barWidth)
-        $bar = ('#' * $filledWidth).PadRight($barWidth, '-')
-        $line = "  $Activity [$bar] $percent% $Status"
-        if ($line.Length -ge $windowWidth) {
-            $line = $line.Substring(0, $windowWidth - 1)
-        }
-        $originalLeft = [Console]::CursorLeft
-        $originalTop = [Console]::CursorTop
-        [Console]::SetCursorPosition(0, [Console]::WindowHeight - 1)
-        [Console]::Write($line.PadRight($windowWidth - 1))
-        [Console]::SetCursorPosition($originalLeft, $originalTop)
-    }
-    catch {
-        Write-Host "[$percent%] $Activity - $Status" -ForegroundColor DarkCyan
-    }
+    Write-Host "  $Activity - $Status" -ForegroundColor DarkCyan
 }
 
 function Clear-StageProgress {
-    try {
-        $windowWidth = [Console]::WindowWidth
-        $originalLeft = [Console]::CursorLeft
-        $originalTop = [Console]::CursorTop
-        [Console]::SetCursorPosition(0, [Console]::WindowHeight - 1)
-        [Console]::Write((' ' * ($windowWidth - 1)))
-        [Console]::SetCursorPosition($originalLeft, $originalTop)
-    }
-    catch {
-    }
-    $script:ProgressState = $null
 }
 
 function Invoke-RequiredCommand {
@@ -67,10 +32,6 @@ function Invoke-RequiredCommand {
         [Parameter(Mandatory)] [string] $Command,
         [Parameter(Mandatory)] [AllowEmptyString()] [string[]] $Arguments
     )
-
-    if ($null -ne $script:ProgressState) {
-        Clear-StageProgress
-    }
 
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) {
@@ -395,7 +356,6 @@ function Invoke-Setup {
     $total = 3
     try {
         Write-StageProgress 1 $total "EC セットアップ" "必要なツールを確認しています..."
-        Clear-StageProgress
         Install-RequiredTools
 
         Write-StageProgress 2 $total "EC セットアップ" "リポジトリ設定を準備しています..."
@@ -404,14 +364,16 @@ function Invoke-Setup {
         }
 
         Write-StageProgress 3 $total "EC セットアップ" "ユーザー設定とリポジトリを準備しています..."
-    Clear-StageProgress
         Initialize-ECRepository
         Clear-StageProgress
+        Set-Content -LiteralPath $script:SetupMarkerPath -Value "completed" -Encoding utf8
         Write-Host "`nセットアップが完了しました。" -ForegroundColor Green
+        return $true
     }
     catch {
         Clear-StageProgress
         Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
     }
 }
 
@@ -702,7 +664,6 @@ function Read-ECMenuChoice {
         @{ Label = "新しい変更で区切る（jj new）"; Color = "DarkCyan"; Action = { Invoke-NewChange } },
         @{ Label = "変更にコメントを付ける（desc）"; Color = "White"; Action = { Invoke-AddDescription } },
         @{ Label = "保存済み設定を変更"; Color = "Yellow"; Action = { Invoke-ConfigChange } },
-        @{ Label = "初回セットアップ（ツール・ユーザー設定・フォルダ選択・clone）"; Color = "Magenta"; Action = { Invoke-Setup } },
         @{ Label = "終了"; Color = "Gray"; Action = { return } }
     )
     $selected = 0
@@ -735,6 +696,13 @@ function Read-ECMenuChoice {
 }
 
 try {
+    if (-not (Test-Path -LiteralPath $script:SetupMarkerPath)) {
+        if (-not (Invoke-Setup)) {
+            exit 1
+        }
+        Write-Host ""
+        Read-Host "Enter でメニューに進みます"
+    }
     Read-ECMenuChoice
 }
 catch {
