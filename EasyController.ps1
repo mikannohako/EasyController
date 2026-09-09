@@ -215,29 +215,65 @@ function Invoke-ConfigChange {
         $currentEmail = [string] $config["email"]
         $currentRepositoryUrl = Get-ECRepositoryUrl
 
-        Write-Host "設定を変更します。空入力なら現在の値を維持します。" -ForegroundColor Cyan
-        $newName = Read-Host "Git ユーザー名 [$currentName]"
-        $newEmail = Read-Host "Git メールアドレス [$currentEmail]"
-        $newRepositoryUrl = Read-Host "リポジトリURL [$currentRepositoryUrl]"
-        if ([string]::IsNullOrWhiteSpace($newName)) { $newName = $currentName }
-        if ([string]::IsNullOrWhiteSpace($newEmail)) { $newEmail = $currentEmail }
-        if ([string]::IsNullOrWhiteSpace($newRepositoryUrl)) { $newRepositoryUrl = $currentRepositoryUrl }
+        $settings = @(
+            [PSCustomObject]@{ Label = "Git ユーザー名"; Key = "name"; Value = $currentName },
+            [PSCustomObject]@{ Label = "Git メールアドレス"; Key = "email"; Value = $currentEmail },
+            [PSCustomObject]@{ Label = "リポジトリURL"; Key = "repository_url"; Value = $currentRepositoryUrl }
+        )
+        $selected = 0
+        while ($true) {
+            Write-ECHeader
+            Write-Host "  変更する設定を選択してください。" -ForegroundColor Cyan
+            Write-Host "  上下:選択  Enter:決定  Esc:キャンセル" -ForegroundColor DarkCyan
+            Write-Host ""
+            for ($index = 0; $index -lt $settings.Count; $index++) {
+                $line = "$($settings[$index].Label): $($settings[$index].Value)"
+                if ($index -eq $selected) {
+                    Write-Host "  > $line" -ForegroundColor White -BackgroundColor DarkGray
+                }
+                else {
+                    Write-Host "    $line" -ForegroundColor Gray
+                }
+            }
+
+            Write-Host "    キャンセル" -ForegroundColor Yellow
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                "UpArrow" { $selected = ($selected - 1 + $settings.Count + 1) % ($settings.Count + 1) }
+                "DownArrow" { $selected = ($selected + 1) % ($settings.Count + 1) }
+                "Escape" { return }
+                "Enter" { break }
+            }
+            if ($key.Key -eq "Enter") {
+                break
+            }
+        }
+
+        if ($selected -eq $settings.Count) {
+            Write-Host "設定変更をキャンセルしました。" -ForegroundColor Yellow
+            return
+        }
+
+        $setting = $settings[$selected]
+        $newValue = Read-Host "$($setting.Label) [$($setting.Value)]"
+        if ([string]::IsNullOrWhiteSpace($newValue)) {
+            Write-Host "設定変更をキャンセルしました。" -ForegroundColor Yellow
+            return
+        }
+
+        $newName = $currentName
+        $newEmail = $currentEmail
+        $newRepositoryUrl = $currentRepositoryUrl
+        switch ($setting.Key) {
+            "name" { $newName = $newValue }
+            "email" { $newEmail = $newValue }
+            "repository_url" { $newRepositoryUrl = $newValue }
+        }
         if ([string]::IsNullOrWhiteSpace($newName) -or [string]::IsNullOrWhiteSpace($newEmail)) {
             throw "名前とメールアドレスは必須です。"
         }
         Test-ECRepositoryUrl -RepositoryUrl $newRepositoryUrl
-
-        $saveDecision = Read-ECSaveDecision
-        if ($saveDecision -eq "cancel") {
-            Write-Host "設定変更をキャンセルしました。" -ForegroundColor Yellow
-            return
-        }
-        if ($saveDecision -eq "save") {
-            Save-ECConfig -UserName $newName -UserEmail $newEmail -RepositoryUrl $newRepositoryUrl
-        }
-        else {
-            Write-Host "設定は変更せず終了しました。" -ForegroundColor Yellow
-        }
+        Save-ECConfig -UserName $newName -UserEmail $newEmail -RepositoryUrl $newRepositoryUrl
     }
     catch {
         Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
@@ -457,32 +493,40 @@ function Invoke-AddDescription {
     Write-ECHeader
     try {
         while ($true) {
-            $logLines = @(& jj log -r "all() ~ root()" --no-graph -T 'change_id ++ "\t" ++ description.first_line() ++ "\n"')
+            $logLines = @(& jj log -r "mutable() ~ root()" --no-graph -T 'change_id ++ "\t" ++ committer.timestamp() ++ "\t" ++ description.first_line() ++ "\n"')
             if ($LASTEXITCODE -ne 0) {
-                throw "コマンドに失敗しました: jj log -r all() ~ root()"
+                throw "コマンドに失敗しました: jj log -r mutable() ~ root()"
             }
 
             $candidates = @()
             foreach ($line in $logLines) {
-                $parts = $line -split "`t", 2
-                if ($parts.Count -eq 2 -and [string]::IsNullOrWhiteSpace($parts[1])) {
-                    $candidates += [PSCustomObject]@{ ChangeId = $parts[0].Trim(); Description = "(コメントなし)" }
+                $parts = $line -split "`t", 3
+                if ($parts.Count -eq 3) {
+                    $description = $parts[2].Trim()
+                    if ([string]::IsNullOrWhiteSpace($description)) {
+                        $description = "(コメントなし)"
+                    }
+                    $candidates += [PSCustomObject]@{
+                        ChangeId = $parts[0].Trim()
+                        Timestamp = $parts[1].Trim()
+                        Description = $description
+                    }
                 }
             }
 
             if ($candidates.Count -eq 0) {
-                Write-Host "コメントが設定されていない変更はありません。" -ForegroundColor Green
+                Write-Host "コメントを設定・変更できる未pushの変更はありません。" -ForegroundColor Green
                 return
             }
 
             $selectedIndex = 0
             while ($true) {
                 Write-ECHeader
-                Write-Host "  コメントを設定する変更を選択してください。" -ForegroundColor Cyan
+                Write-Host "  コメントを設定・変更する変更を選択してください。" -ForegroundColor Cyan
                 Write-Host "  上下:選択  Enter:決定  Esc:キャンセル" -ForegroundColor DarkCyan
                 Write-Host ""
                 for ($index = 0; $index -lt $candidates.Count; $index++) {
-                    $line = "$($candidates[$index].ChangeId) $($candidates[$index].Description)"
+                    $line = "$($candidates[$index].ChangeId)  $($candidates[$index].Timestamp)  $($candidates[$index].Description)"
                     if ($index -eq $selectedIndex) {
                         Write-Host "  > $line" -ForegroundColor White -BackgroundColor DarkGray
                     }
@@ -503,7 +547,7 @@ function Invoke-AddDescription {
                 }
             }
 
-            $comment = Read-Host "変更コメント"
+            $comment = Read-Host "変更コメント（上書き可）"
             if ([string]::IsNullOrWhiteSpace($comment)) {
                 Write-Host "コメントが空のためキャンセルしました。" -ForegroundColor Yellow
                 return
@@ -553,6 +597,23 @@ function Invoke-ReviewChanges {
         Clear-StageProgress
         Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
     }
+}
+
+function Invoke-ViewHistory {
+    Write-ECHeader
+    try {
+        Write-Host "  変更履歴" -ForegroundColor Cyan
+        Write-Host ""
+        & jj log -r "all()" --no-pager
+        if ($LASTEXITCODE -ne 0) {
+            throw "コマンドに失敗しました: jj log -r all() --no-pager"
+        }
+    }
+    catch {
+        Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    Write-Host ""
 }
 
 function Get-ECStatusColor {
@@ -620,6 +681,7 @@ function Show-ECFileDiff {
 function Read-ECMenuChoice {
     $items = @(
         @{ Label = "変更を確認（status / diff）"; Color = "Cyan"; Action = { Invoke-ReviewChanges } },
+        @{ Label = "変更履歴を閲覧（log）"; Color = "DarkCyan"; Action = { Invoke-ViewHistory } },
         @{ Label = "最新の情報を取得（fetch / rebase）"; Color = "Blue"; Action = { Invoke-Update } },
         @{ Label = "変更を保存（commit / push）"; Color = "Green"; Action = { Invoke-Publish } },
         @{ Label = "新しい変更で区切る（jj new）"; Color = "DarkCyan"; Action = { Invoke-NewChange } },
