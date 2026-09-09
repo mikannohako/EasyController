@@ -37,12 +37,7 @@ function Write-StageProgress {
         if ($line.Length -ge $windowWidth) {
             $line = $line.Substring(0, $windowWidth - 1)
         }
-
-        $originalLeft = [Console]::CursorLeft
-        $originalTop = [Console]::CursorTop
-        [Console]::SetCursorPosition(0, [Console]::WindowHeight - 1)
-        [Console]::Write($line.PadRight($windowWidth - 1))
-        [Console]::SetCursorPosition($originalLeft, $originalTop)
+        Write-Host $line -ForegroundColor DarkCyan
     }
     catch {
         Write-Host "[$percent%] $Activity - $Status" -ForegroundColor DarkCyan
@@ -50,22 +45,13 @@ function Write-StageProgress {
 }
 
 function Clear-StageProgress {
-    try {
-        $windowWidth = [Console]::WindowWidth
-        $originalLeft = [Console]::CursorLeft
-        $originalTop = [Console]::CursorTop
-        [Console]::SetCursorPosition(0, [Console]::WindowHeight - 1)
-        [Console]::Write((' ' * ($windowWidth - 1)))
-        [Console]::SetCursorPosition($originalLeft, $originalTop)
-    }
-    catch {
-    }
+    $script:ProgressState = $null
 }
 
 function Invoke-RequiredCommand {
     param(
         [Parameter(Mandatory)] [string] $Command,
-        [Parameter(Mandatory)] [string[]] $Arguments
+        [Parameter(Mandatory)] [AllowEmptyString()] [string[]] $Arguments
     )
 
     $hasProgress = $null -ne $script:ProgressState
@@ -73,17 +59,9 @@ function Invoke-RequiredCommand {
         Clear-StageProgress
     }
 
-    try {
-        & $Command @Arguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "コマンドに失敗しました: $Command $($Arguments -join ' ')"
-        }
-    }
-    finally {
-        if ($hasProgress -and $null -ne $script:ProgressState) {
-            $progress = $script:ProgressState
-            Write-StageProgress -Current $progress.Current -Total $progress.Total -Activity $progress.Activity -Status $progress.Status
-        }
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "コマンドに失敗しました: $Command $($Arguments -join ' ')"
     }
 }
 
@@ -412,8 +390,29 @@ function Invoke-Publish {
         Invoke-RequiredCommand "jj" @("status")
         
         Write-Host ""
-        Write-Host "変更を公開するにはコメントが必要です。（空白でキャンセル）" -ForegroundColor Cyan
-        $comment = Read-Host "変更コメント"
+        $existingComment = @(& jj log -r "@" --no-graph -T "description") -join [Environment]::NewLine
+        if ($LASTEXITCODE -ne 0) {
+            throw "コマンドに失敗しました: jj log -r @ --no-graph -T description"
+        }
+        $existingComment = $existingComment.Trim()
+
+        if (-not [string]::IsNullOrWhiteSpace($existingComment)) {
+            Write-Host "現在のコメント:" -ForegroundColor Cyan
+            Write-Host $existingComment -ForegroundColor DarkGray
+            $reuseComment = Read-Host "このコメントを利用しますか？ [Y/n]"
+            if ([string]::IsNullOrWhiteSpace($reuseComment) -or $reuseComment -match '^(Y|y)$') {
+                $comment = $existingComment
+            }
+            else {
+                Write-Host "変更を公開するにはコメントが必要です。（空白でキャンセル）" -ForegroundColor Cyan
+                $comment = Read-Host "変更コメント"
+            }
+        }
+        else {
+            Write-Host "変更を公開するにはコメントが必要です。（空白でキャンセル）" -ForegroundColor Cyan
+            $comment = Read-Host "変更コメント"
+        }
+
         if ([string]::IsNullOrWhiteSpace($comment)) {
             Clear-StageProgress
             Write-Host "`n公開をキャンセルしました。" -ForegroundColor Yellow
@@ -431,6 +430,20 @@ function Invoke-Publish {
         Clear-StageProgress
         Write-Host "`nアップロードが完了しました。" -ForegroundColor Green
         Write-Host "コメント: $comment" -ForegroundColor DarkGray
+    }
+    catch {
+        Clear-StageProgress
+        Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function Invoke-NewChange {
+    Write-ECHeader
+    try {
+        Write-StageProgress 1 1 "EC 区切り" "新しい変更を作成しています..."
+        Invoke-RequiredCommand "jj" @("new", "-m", "")
+        Clear-StageProgress
+        Write-Host "`n新しい変更を作成しました。" -ForegroundColor Green
     }
     catch {
         Clear-StageProgress
@@ -538,6 +551,7 @@ function Read-ECMenuChoice {
         @{ Label = "変更を確認（status / diff）"; Color = "Cyan"; Action = { Invoke-ReviewChanges } },
         @{ Label = "最新の情報を取得（fetch / rebase）"; Color = "Blue"; Action = { Invoke-Update } },
         @{ Label = "変更を保存（commit / push）"; Color = "Green"; Action = { Invoke-Publish } },
+        @{ Label = "新しい変更で区切る（jj new）"; Color = "DarkCyan"; Action = { Invoke-NewChange } },
         @{ Label = "保存済み設定を変更"; Color = "Yellow"; Action = { Invoke-ConfigChange } },
         @{ Label = "初回セットアップ（ツール・ユーザー設定・フォルダ選択・clone）"; Color = "Magenta"; Action = { Invoke-Setup } },
         @{ Label = "終了"; Color = "Gray"; Action = { return } }
