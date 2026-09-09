@@ -440,10 +440,81 @@ function Invoke-Publish {
 function Invoke-NewChange {
     Write-ECHeader
     try {
+        Write-Host "新しい変更のコメントを入力してください。（空白でコメントなし）" -ForegroundColor Cyan
+        $comment = Read-Host "変更コメント"
         Write-StageProgress 1 1 "EC 区切り" "新しい変更を作成しています..."
-        Invoke-RequiredCommand "jj" @("new", "-m", "")
+        Invoke-RequiredCommand "jj" @("new", "-m", $comment)
         Clear-StageProgress
         Write-Host "`n新しい変更を作成しました。" -ForegroundColor Green
+    }
+    catch {
+        Clear-StageProgress
+        Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function Invoke-AddDescription {
+    Write-ECHeader
+    try {
+        while ($true) {
+            $logLines = @(& jj log -r "all() ~ root()" --no-graph -T 'change_id ++ "\t" ++ description.first_line() ++ "\n"')
+            if ($LASTEXITCODE -ne 0) {
+                throw "コマンドに失敗しました: jj log -r all() ~ root()"
+            }
+
+            $candidates = @()
+            foreach ($line in $logLines) {
+                $parts = $line -split "`t", 2
+                if ($parts.Count -eq 2 -and [string]::IsNullOrWhiteSpace($parts[1])) {
+                    $candidates += [PSCustomObject]@{ ChangeId = $parts[0].Trim(); Description = "(コメントなし)" }
+                }
+            }
+
+            if ($candidates.Count -eq 0) {
+                Write-Host "コメントが設定されていない変更はありません。" -ForegroundColor Green
+                return
+            }
+
+            $selectedIndex = 0
+            while ($true) {
+                Write-ECHeader
+                Write-Host "  コメントを設定する変更を選択してください。" -ForegroundColor Cyan
+                Write-Host "  上下:選択  Enter:決定  Esc:キャンセル" -ForegroundColor DarkCyan
+                Write-Host ""
+                for ($index = 0; $index -lt $candidates.Count; $index++) {
+                    $line = "$($candidates[$index].ChangeId) $($candidates[$index].Description)"
+                    if ($index -eq $selectedIndex) {
+                        Write-Host "  > $line" -ForegroundColor White -BackgroundColor DarkGray
+                    }
+                    else {
+                        Write-Host "    $line" -ForegroundColor Gray
+                    }
+                }
+
+                $key = [Console]::ReadKey($true)
+                switch ($key.Key) {
+                    "UpArrow" { $selectedIndex = ($selectedIndex - 1 + $candidates.Count) % $candidates.Count }
+                    "DownArrow" { $selectedIndex = ($selectedIndex + 1) % $candidates.Count }
+                    "Escape" { return }
+                    "Enter" { break }
+                }
+                if ($key.Key -eq "Enter") {
+                    break
+                }
+            }
+
+            $comment = Read-Host "変更コメント"
+            if ([string]::IsNullOrWhiteSpace($comment)) {
+                Write-Host "コメントが空のためキャンセルしました。" -ForegroundColor Yellow
+                return
+            }
+
+            Write-StageProgress 1 1 "コメント設定" "変更コメントを設定しています..."
+            Invoke-RequiredCommand "jj" @("desc", "-r", $candidates[$selectedIndex].ChangeId, "-m", $comment)
+            Clear-StageProgress
+            Write-Host "`nコメントを設定しました。" -ForegroundColor Green
+            Write-Host "続けて別の変更にもコメントを設定できます。" -ForegroundColor DarkCyan
+        }
     }
     catch {
         Clear-StageProgress
@@ -552,6 +623,7 @@ function Read-ECMenuChoice {
         @{ Label = "最新の情報を取得（fetch / rebase）"; Color = "Blue"; Action = { Invoke-Update } },
         @{ Label = "変更を保存（commit / push）"; Color = "Green"; Action = { Invoke-Publish } },
         @{ Label = "新しい変更で区切る（jj new）"; Color = "DarkCyan"; Action = { Invoke-NewChange } },
+        @{ Label = "変更にコメントを付ける（desc）"; Color = "White"; Action = { Invoke-AddDescription } },
         @{ Label = "保存済み設定を変更"; Color = "Yellow"; Action = { Invoke-ConfigChange } },
         @{ Label = "初回セットアップ（ツール・ユーザー設定・フォルダ選択・clone）"; Color = "Magenta"; Action = { Invoke-Setup } },
         @{ Label = "終了"; Color = "Gray"; Action = { return } }
