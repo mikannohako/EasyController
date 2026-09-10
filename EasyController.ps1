@@ -130,8 +130,8 @@ function Get-ECProjectDirectory {
     }
 
     $resolvedProjectDirectory = (Resolve-Path -LiteralPath $projectDirectory).Path
-    $hasJujutsuRepository = Test-Path -LiteralPath (Join-Path $resolvedProjectDirectory ".jj") -PathType Container
-    $hasGitRepository = Test-Path -LiteralPath (Join-Path $resolvedProjectDirectory ".git") -PathType Container
+    $hasJujutsuRepository = Test-Path -LiteralPath (Join-Path $resolvedProjectDirectory ".jj")
+    $hasGitRepository = Test-Path -LiteralPath (Join-Path $resolvedProjectDirectory ".git")
     if (-not ($hasJujutsuRepository -or $hasGitRepository)) {
         throw "保存済みのフォルダは Git/Jujutsu リポジトリではありません: $resolvedProjectDirectory"
     }
@@ -361,32 +361,30 @@ function Select-ECProjectDirectory {
         throw "プロジェクトフォルダ名に使用できない文字が含まれています。"
     }
 
-    Add-Type -AssemblyName System.Windows.Forms
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "プロジェクトを置く親フォルダを選択してください"
-    $dialog.ShowNewFolderButton = $true
-    $dialog.SelectedPath = [Environment]::GetFolderPath("Desktop")
-
-    try {
-        if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
-            throw "プロジェクトフォルダの選択をキャンセルしました。"
-        }
-
-        $projectDirectory = Join-Path $dialog.SelectedPath $projectName
-        if (Test-Path $projectDirectory) {
-            if (-not (Test-Path $projectDirectory -PathType Container)) {
-                throw "同名のファイルが既に存在します: $projectDirectory"
-            }
-            if (@(Get-ChildItem -LiteralPath $projectDirectory -Force).Count -gt 0) {
-                throw "選択した場所に既存のファイルがあります: $projectDirectory"
-            }
-        }
-
-        return $projectDirectory
+    $defaultParentDirectory = [Environment]::GetFolderPath("Desktop")
+    $parentDirectory = Read-Host "プロジェクトを置く親フォルダのパス [$defaultParentDirectory]"
+    if ([string]::IsNullOrWhiteSpace($parentDirectory)) {
+        $parentDirectory = $defaultParentDirectory
     }
-    finally {
-        $dialog.Dispose()
+    $parentDirectory = $parentDirectory.Trim().Trim('"')
+    if (-not (Test-Path -LiteralPath $parentDirectory -PathType Container)) {
+        throw "親フォルダが見つかりません: $parentDirectory"
     }
+
+    $projectDirectory = Join-Path (Resolve-Path -LiteralPath $parentDirectory).Path $projectName
+    if (Test-Path $projectDirectory) {
+        if (-not (Test-Path $projectDirectory -PathType Container)) {
+            throw "同名のファイルが既に存在します: $projectDirectory"
+        }
+        $hasJujutsuRepository = Test-Path -LiteralPath (Join-Path $projectDirectory ".jj")
+        $hasGitRepository = Test-Path -LiteralPath (Join-Path $projectDirectory ".git")
+        $hasExistingFiles = @(Get-ChildItem -LiteralPath $projectDirectory -Force).Count -gt 0
+        if ($hasExistingFiles -and -not ($hasJujutsuRepository -or $hasGitRepository)) {
+            throw "選択した場所に既存のファイルがあります: $projectDirectory"
+        }
+    }
+
+    return $projectDirectory
 }
 
 function Initialize-ECRepository {
@@ -401,8 +399,15 @@ function Initialize-ECRepository {
     Invoke-RequiredCommand "jj" @("config", "set", "--user", "user.name", $userSettings.Name)
     Invoke-RequiredCommand "jj" @("config", "set", "--user", "user.email", $userSettings.Email)
 
-    Write-Host "リポジトリを取得しています..." -ForegroundColor Yellow
-    Invoke-RequiredCommand "jj" @("git", "clone", $repositoryUrl, ".")
+    $hasJujutsuRepository = Test-Path -LiteralPath (Join-Path $projectDirectory ".jj")
+    $hasGitRepository = Test-Path -LiteralPath (Join-Path $projectDirectory ".git")
+    if ($hasJujutsuRepository -or $hasGitRepository) {
+        Write-Host "既存のリポジトリを使用します..." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "リポジトリを取得しています..." -ForegroundColor Yellow
+        Invoke-RequiredCommand "jj" @("git", "clone", $repositoryUrl, ".")
+    }
     Save-ECProjectDirectory -ProjectDirectory $projectDirectory
     explorer.exe $projectDirectory
 
