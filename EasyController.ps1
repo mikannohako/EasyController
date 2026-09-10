@@ -606,6 +606,118 @@ function Invoke-AddDescription {
     }
 }
 
+function Invoke-Undo {
+    Write-ECHeader
+    try {
+        Write-Host "直前の操作を取り消します。" -ForegroundColor Yellow
+        $decision = Read-Host "実行しますか？ [y/N]"
+        if ($decision -notmatch '^(?i)y(es)?$') {
+            Write-Host "取り消しをキャンセルしました。" -ForegroundColor Yellow
+            return
+        }
+
+        Write-StageProgress 1 1 "EC Undo" "直前の操作を取り消しています..."
+        Invoke-RequiredCommand "jj" @("undo")
+        Clear-StageProgress
+        Write-Host "`n直前の操作を取り消しました。" -ForegroundColor Green
+    }
+    catch {
+        Clear-StageProgress
+        Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function Get-ECConflictFiles {
+    $conflictLines = @(& jj resolve --list 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $errorText = ($conflictLines | ForEach-Object { [string] $_ }) -join [Environment]::NewLine
+        if ($errorText -match "(?i)No conflicts found at this revision") {
+            return @()
+        }
+        throw "コマンドに失敗しました: jj resolve --list"
+    }
+
+    $conflictFiles = @()
+    foreach ($line in $conflictLines) {
+        $path = ([string] $line).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            $conflictFiles += [PSCustomObject]@{
+                Status = "C"
+                Path = $path
+            }
+        }
+    }
+    return $conflictFiles
+}
+
+function Invoke-ResolveConflicts {
+    try {
+        $conflictFiles = @(Get-ECConflictFiles)
+        if ($conflictFiles.Count -eq 0) {
+            Write-ECHeader
+            Write-Host "  コンフリクトがありません。" -ForegroundColor Green
+            return
+        }
+
+        $selected = 0
+        while ($true) {
+            Write-ECHeader
+            Write-Host "  解決するコンフリクトを選択してください。" -ForegroundColor Cyan
+            Write-Host "  上下:選択  Enter:決定  Esc:キャンセル" -ForegroundColor DarkCyan
+            Write-Host ""
+            for ($index = 0; $index -lt $conflictFiles.Count; $index++) {
+                $line = "[C] $($conflictFiles[$index].Path)"
+                if ($index -eq $selected) {
+                    Write-Host "  > $line" -ForegroundColor Red -BackgroundColor DarkGray
+                }
+                else {
+                    Write-Host "    $line" -ForegroundColor Red
+                }
+            }
+
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                "UpArrow" { $selected = ($selected - 1 + $conflictFiles.Count) % $conflictFiles.Count }
+                "DownArrow" { $selected = ($selected + 1) % $conflictFiles.Count }
+                "Escape" { return }
+                "Enter" { break }
+            }
+            if ($key.Key -eq "Enter") {
+                break
+            }
+        }
+
+        $conflictPath = $conflictFiles[$selected].Path
+        Write-Host ""
+        Write-Host "対象: $conflictPath" -ForegroundColor Cyan
+        Write-Host "  L: ローカルを優先"
+        Write-Host "  R: リモートを優先"
+        Write-Host "  C: キャンセル"
+        $decision = Read-Host "解決方法"
+        if ($decision -match '^(?i)l(ocal)?$') {
+            $tool = ":ours"
+            $side = "ローカル"
+        }
+        elseif ($decision -match '^(?i)r(emote)?$') {
+            $tool = ":theirs"
+            $side = "リモート"
+        }
+        else {
+            Write-Host "コンフリクト解決をキャンセルしました。" -ForegroundColor Yellow
+            return
+        }
+
+        Write-StageProgress 1 1 "コンフリクト解決" "$side を優先しています..."
+        Invoke-RequiredCommand "jj" @("resolve", "--tool", $tool, "--", $conflictPath)
+        Clear-StageProgress
+        Write-Host "`nコンフリクトを解決しました: $conflictPath" -ForegroundColor Green
+    }
+    catch {
+        Clear-StageProgress
+        Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
 function Invoke-ReviewChanges {
     $changedFiles = @()
     try {
@@ -721,11 +833,13 @@ function Show-ECFileDiff {
 function Read-ECMenuChoice {
     $items = @(
         @{ Label = "変更を確認（status / diff）"; Color = "Cyan"; Action = { Invoke-ReviewChanges } },
-        @{ Label = "変更履歴を閲覧（log）"; Color = "DarkCyan"; Action = { Invoke-ViewHistory } },
         @{ Label = "最新の情報を取得（fetch / rebase）"; Color = "Blue"; Action = { Invoke-Update } },
         @{ Label = "変更を保存（commit / push）"; Color = "Green"; Action = { Invoke-Publish } },
         @{ Label = "新しい変更で区切る（jj new）"; Color = "DarkCyan"; Action = { Invoke-NewChange } },
         @{ Label = "変更にコメントを付ける（desc）"; Color = "White"; Action = { Invoke-AddDescription } },
+        @{ Label = "変更履歴を閲覧（log）"; Color = "DarkCyan"; Action = { Invoke-ViewHistory } },
+        @{ Label = "直前の操作を取り消す（undo）"; Color = "Yellow"; Action = { Invoke-Undo } },
+        @{ Label = "コンフリクトを解決（local / remote）"; Color = "Red"; Action = { Invoke-ResolveConflicts } },
         @{ Label = "保存済み設定を変更"; Color = "Yellow"; Action = { Invoke-ConfigChange } },
         @{ Label = "終了"; Color = "Gray"; Action = { return } }
     )
@@ -767,7 +881,19 @@ try {
         Read-Host "Enter でメニューに進みます"
     }
     else {
-        Set-ECProjectLocation
+        try {
+            Set-ECProjectLocation
+        }
+        catch {
+            Write-Host "`n保存済みプロジェクトを利用できません: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "セットアップ情報を削除して、セットアップをやり直します。" -ForegroundColor Yellow
+            Remove-Item -LiteralPath $script:SetupMarkerPath -Force
+            if (-not (Invoke-Setup)) {
+                exit 1
+            }
+            Write-Host ""
+            Read-Host "Enter でメニューに進みます"
+        }
     }
     Read-ECMenuChoice
 }

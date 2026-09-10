@@ -20,6 +20,8 @@ if errorlevel 1 (
     echo Installation completed. Restarting EasyController...
     timeout /t 2 >nul
 
+    remove-item -literalpath .\.setup-completed -force -erroraction stop
+
     start "" "%~f0"
     exit /b
 )
