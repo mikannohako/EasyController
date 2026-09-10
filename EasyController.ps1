@@ -76,11 +76,14 @@ function Save-ECConfig {
         [string] $RepositoryUrl = $script:DefaultRepositoryUrl
     )
 
+    $existingConfig = Read-ECConfig
+    $projectDirectory = [string] $existingConfig["project_directory"]
     $lines = @(
         "[user]",
         "name=$UserName",
         "email=$UserEmail",
         "repository_url=$RepositoryUrl",
+        "project_directory=$projectDirectory",
         ""
     )
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -125,7 +128,15 @@ function Get-ECProjectDirectory {
     if (-not (Test-Path -LiteralPath $projectDirectory -PathType Container)) {
         throw "保存済みのプロジェクトフォルダが見つかりません: $projectDirectory"
     }
-    return (Resolve-Path -LiteralPath $projectDirectory).Path
+
+    $resolvedProjectDirectory = (Resolve-Path -LiteralPath $projectDirectory).Path
+    $hasJujutsuRepository = Test-Path -LiteralPath (Join-Path $resolvedProjectDirectory ".jj") -PathType Container
+    $hasGitRepository = Test-Path -LiteralPath (Join-Path $resolvedProjectDirectory ".git") -PathType Container
+    if (-not ($hasJujutsuRepository -or $hasGitRepository)) {
+        throw "保存済みのフォルダは Git/Jujutsu リポジトリではありません: $resolvedProjectDirectory"
+    }
+
+    return $resolvedProjectDirectory
 }
 
 function Set-ECProjectLocation {
