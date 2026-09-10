@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $script:DefaultRepositoryUrl = "https://github.com/mikannohako/EasyController.git"
 $script:ConfigPath = Join-Path $PSScriptRoot "config.ini"
 $script:SetupMarkerPath = Join-Path $PSScriptRoot ".setup-completed"
+$Host.UI.RawUI.WindowTitle = "EasyController"
 
 function Write-ECHeader {
     Clear-Host
@@ -85,6 +86,51 @@ function Save-ECConfig {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllLines($script:ConfigPath, $lines, $utf8NoBom)
     Write-Host "設定を保存しました: $script:ConfigPath" -ForegroundColor Green
+}
+
+function Save-ECProjectDirectory {
+    param([Parameter(Mandatory)] [string] $ProjectDirectory)
+
+    $lines = @()
+    if (Test-Path -LiteralPath $script:ConfigPath) {
+        $lines = [System.IO.File]::ReadAllLines($script:ConfigPath)
+    }
+
+    $projectLineIndex = -1
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($lines[$index] -match '^\s*project_directory\s*=') {
+            $projectLineIndex = $index
+            break
+        }
+    }
+
+    $projectLine = "project_directory=$ProjectDirectory"
+    if ($projectLineIndex -ge 0) {
+        $lines[$projectLineIndex] = $projectLine
+    }
+    else {
+        $lines += $projectLine
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($script:ConfigPath, $lines, $utf8NoBom)
+}
+
+function Get-ECProjectDirectory {
+    $config = Read-ECConfig
+    $projectDirectory = [string] $config["project_directory"]
+    if ([string]::IsNullOrWhiteSpace($projectDirectory)) {
+        throw "セットアップ先のプロジェクトフォルダが設定されていません。セットアップを再実行してください。"
+    }
+    if (-not (Test-Path -LiteralPath $projectDirectory -PathType Container)) {
+        throw "保存済みのプロジェクトフォルダが見つかりません: $projectDirectory"
+    }
+    return (Resolve-Path -LiteralPath $projectDirectory).Path
+}
+
+function Set-ECProjectLocation {
+    $projectDirectory = Get-ECProjectDirectory
+    Set-Location -LiteralPath $projectDirectory
 }
 
 function Get-ECRepositoryUrl {
@@ -346,6 +392,7 @@ function Initialize-ECRepository {
 
     Write-Host "リポジトリを取得しています..." -ForegroundColor Yellow
     Invoke-RequiredCommand "jj" @("git", "clone", $repositoryUrl, ".")
+    Save-ECProjectDirectory -ProjectDirectory $projectDirectory
     explorer.exe $projectDirectory
 
     Write-Host "セットアップ先: $projectDirectory" -ForegroundColor Green
@@ -702,6 +749,9 @@ try {
         }
         Write-Host ""
         Read-Host "Enter でメニューに進みます"
+    }
+    else {
+        Set-ECProjectLocation
     }
     Read-ECMenuChoice
 }
