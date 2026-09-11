@@ -458,18 +458,22 @@ function Invoke-Update {
         Invoke-RequiredCommand "jj" @("rebase", "-d", "main@origin")
         Clear-StageProgress
         Write-Host "`n更新が完了しました。`n" -ForegroundColor Green
+        Write-Host "現在の状態:" -ForegroundColor Cyan
         & jj status
     }
     catch {
         Clear-StageProgress
         Write-Host "`nエラー: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "コンフリクトなどが発生している可能性があります。" -ForegroundColor Yellow
+        Write-Host "コンフリクトなどが発生している可能性があります。コンフリクトを解決してください。" -ForegroundColor Yellow
     }
 }
 
 function Invoke-Publish {
     Write-ECHeader
     try {
+
+        Invoke-Update
+
         Write-StageProgress 1 4 "EC 保存" "変更を確認しています..."
         Invoke-RequiredCommand "jj" @("status")
         
@@ -524,8 +528,13 @@ function Invoke-Publish {
 function Invoke-NewChange {
     Write-ECHeader
     try {
-        Write-Host "新しい変更のコメントを入力してください。（空白でコメントなし）" -ForegroundColor Cyan
+        Write-Host "新しい変更のコメントを入力してください。（空白でキャンセル）" -ForegroundColor Cyan
         $comment = Read-Host "変更コメント"
+        if ([string]::IsNullOrWhiteSpace($comment)) {
+            Clear-StageProgress
+            Write-Host "`n変更をキャンセルしました。" -ForegroundColor Yellow
+            return
+        }
         Write-StageProgress 1 1 "EC 区切り" "新しい変更を作成しています..."
         Invoke-RequiredCommand "jj" @("new", "-m", $comment)
         Clear-StageProgress
@@ -575,6 +584,7 @@ function Invoke-AddDescription {
                 Write-Host ""
                 for ($index = 0; $index -lt $candidates.Count; $index++) {
                     $line = "$($candidates[$index].ChangeId)  $($candidates[$index].Timestamp)  $($candidates[$index].Description)"
+
                     if ($index -eq $selectedIndex) {
                         Write-Host "  > $line" -ForegroundColor White -BackgroundColor DarkGray
                     }
@@ -583,19 +593,26 @@ function Invoke-AddDescription {
                     }
                 }
 
+                if ($selectedIndex -eq $candidates.Count) {
+                    Write-Host "  > キャンセル" -ForegroundColor Yellow -BackgroundColor DarkGray
+                }
+                else {
+                    Write-Host "    キャンセル" -ForegroundColor Yellow
+                }
+
                 $key = [Console]::ReadKey($true)
                 switch ($key.Key) {
-                    "UpArrow" { $selectedIndex = ($selectedIndex - 1 + $candidates.Count) % $candidates.Count }
-                    "DownArrow" { $selectedIndex = ($selectedIndex + 1) % $candidates.Count }
+                    "UpArrow" { $selectedIndex = ($selectedIndex - 1 + $candidates.Count + 1) % ($candidates.Count + 1) }
+                    "DownArrow" { $selectedIndex = ($selectedIndex + 1) % ($candidates.Count + 1) }
                     "Escape" { return }
-                    "Enter" { break }
+                    "Enter" { if ($selectedIndex -eq $candidates.Count) { return } break }
                 }
                 if ($key.Key -eq "Enter") {
                     break
                 }
             }
 
-            $comment = Read-Host "変更コメント（上書き可）"
+            $comment = Read-Host "変更コメント（上書き可・空白でキャンセル）"
             if ([string]::IsNullOrWhiteSpace($comment)) {
                 Write-Host "コメントが空のためキャンセルしました。" -ForegroundColor Yellow
                 return
