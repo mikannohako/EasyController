@@ -470,7 +470,7 @@ function Invoke-Update {
 function Invoke-Publish {
     Write-ECHeader
     try {
-        Write-StageProgress 1 4 "EC 公開" "変更を確認しています..."
+        Write-StageProgress 1 4 "EC 保存" "変更を確認しています..."
         Invoke-RequiredCommand "jj" @("status")
         
         Write-Host ""
@@ -488,28 +488,28 @@ function Invoke-Publish {
                 $comment = $existingComment
             }
             else {
-                Write-Host "変更を公開するにはコメントが必要です。（空白でキャンセル）" -ForegroundColor Cyan
+                Write-Host "変更を保存するにはコメントが必要です。（空白でキャンセル）" -ForegroundColor Cyan
                 $comment = Read-Host "変更コメント"
             }
         }
         else {
-            Write-Host "変更を公開するにはコメントが必要です。（空白でキャンセル）" -ForegroundColor Cyan
+            Write-Host "変更を保存するにはコメントが必要です。（空白でキャンセル）" -ForegroundColor Cyan
             $comment = Read-Host "変更コメント"
         }
 
         if ([string]::IsNullOrWhiteSpace($comment)) {
             Clear-StageProgress
-            Write-Host "`n公開をキャンセルしました。" -ForegroundColor Yellow
+            Write-Host "`n保存をキャンセルしました。" -ForegroundColor Yellow
             return
         }
 
-        Write-StageProgress 2 4 "EC 公開" "変更にコメントを設定しています..."
+        Write-StageProgress 2 4 "EC 保存" "変更にコメントを設定しています..."
         Invoke-RequiredCommand "jj" @("desc", "-m", $comment)
 
-        Write-StageProgress 3 4 "EC 公開" "main を更新しています..."
+        Write-StageProgress 3 4 "EC 保存" "main を更新しています..."
         Invoke-RequiredCommand "jj" @("bookmark", "set", "main", "-r", "@")
 
-        Write-StageProgress 4 4 "EC 公開" "サーバーへアップロードしています..."
+        Write-StageProgress 4 4 "EC 保存" "サーバーへアップロードしています..."
         Invoke-RequiredCommand "jj" @("git", "push")
         Clear-StageProgress
         Write-Host "`nアップロードが完了しました。" -ForegroundColor Green
