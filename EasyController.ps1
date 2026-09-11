@@ -757,9 +757,9 @@ function Invoke-ReviewChanges {
 function Invoke-ViewHistory {
     Write-ECHeader
     try {
-        Write-Host "  変更履歴" -ForegroundColor Cyan
+        Write-Host "  変更履歴（最近10件）" -ForegroundColor Cyan
         Write-Host ""
-        & jj log -r "all()" --no-pager
+        & jj log -r "all()" -n 10 --no-pager
         if ($LASTEXITCODE -ne 0) {
             throw "コマンドに失敗しました: jj log -r all() --no-pager"
         }
