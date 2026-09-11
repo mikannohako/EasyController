@@ -270,7 +270,12 @@ function Invoke-ConfigChange {
                 }
             }
 
-            Write-Host "    キャンセル" -ForegroundColor Yellow
+            if ($selected -eq $settings.Count) {
+                Write-Host "  > キャンセル" -ForegroundColor Yellow -BackgroundColor DarkGray
+            }
+            else {
+                Write-Host "    キャンセル" -ForegroundColor Yellow
+            }
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 "UpArrow" { $selected = ($selected - 1 + $settings.Count + 1) % ($settings.Count + 1) }
