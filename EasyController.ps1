@@ -1,3 +1,6 @@
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $ErrorActionPreference = "Stop"
 
 $script:DefaultRepositoryUrl = "https://github.com/mikannohako/EasyController.git"
