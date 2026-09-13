@@ -1,4 +1,4 @@
-[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ErrorActionPreference = "Stop"
@@ -6,13 +6,60 @@ $ErrorActionPreference = "Stop"
 $script:DefaultRepositoryUrl = "https://github.com/mikannohako/EasyController.git"
 $script:ConfigPath = Join-Path $PSScriptRoot "config.ini"
 $script:SetupMarkerPath = Join-Path $PSScriptRoot ".setup-completed"
+$script:EasyControllerVersion = "3.0.0"
 $Host.UI.RawUI.WindowTitle = "EasyController"
+
+function Get-ECLatestRelease {
+    $release = Invoke-RestMethod `
+        -Uri "https://api.github.com/repos/mikannohako/EasyController/releases/latest" `
+        -Headers @{ "User-Agent" = "EasyController" }
+
+    if ($null -eq $release) {
+        throw "GitHub APIからリリース情報を取得できませんでした。"
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$release.tag_name)) {
+        throw "最新リリースのバージョン情報が取得できませんでした。"
+    }
+
+    return $release
+}
+
+function Test-ECUpdate {
+    try {
+        $release = Get-ECLatestRelease
+
+        $latestVersion = ([string]$release.tag_name).TrimStart("v")
+        $latestUrl = [string]$release.html_url
+
+        if ([version]$latestVersion -gt [version]$script:EasyControllerVersion) {
+            Write-Host ""
+            Write-Host "新しいEasyControllerがあります。" -ForegroundColor Yellow
+            Write-Host "  現在: $script:EasyControllerVersion" -ForegroundColor Gray
+            Write-Host "  最新: $latestVersion" -ForegroundColor Green
+            Write-Host ""
+
+            $open = Read-Host "最新版のページを開きますか？ [Y/n]"
+
+            if (
+                [string]::IsNullOrWhiteSpace($open) -or
+                $open -match '^(?i)y(es)?$'
+            ) {
+                Start-Process $latestUrl
+            }
+        }
+    }
+    catch {
+        Write-Host "EasyControllerの更新確認中にエラーが発生しました: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
 
 function Write-ECHeader {
     Clear-Host
     Write-Host ""
     Write-Host "  Easy Controller" -ForegroundColor Cyan
     Write-Host "  Git / Jujutsu project toolkit" -ForegroundColor DarkCyan
+    Write-Host "  Version $script:EasyControllerVersion" -ForegroundColor DarkGray
     Write-Host "  $('-' * 42)" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -564,8 +611,8 @@ function Invoke-AddDescription {
                         $description = "(コメントなし)"
                     }
                     $candidates += [PSCustomObject]@{
-                        ChangeId = $parts[0].Trim()
-                        Timestamp = $parts[1].Trim()
+                        ChangeId    = $parts[0].Trim()
+                        Timestamp   = $parts[1].Trim()
                         Description = $description
                     }
                 }
@@ -668,7 +715,7 @@ function Get-ECConflictFiles {
         if (-not [string]::IsNullOrWhiteSpace($path)) {
             $conflictFiles += [PSCustomObject]@{
                 Status = "C"
-                Path = $path
+                Path   = $path
             }
         }
     }
@@ -756,7 +803,7 @@ function Invoke-ReviewChanges {
             if ($line -match '^\s*([MADRC?])\s+(.+?)\s*$') {
                 $changedFiles += [PSCustomObject]@{
                     Status = $Matches[1]
-                    Path = $Matches[2]
+                    Path   = $Matches[2]
                 }
             }
         }
@@ -902,6 +949,7 @@ try {
         if (-not (Invoke-Setup)) {
             exit 1
         }
+
         Write-Host ""
         Read-Host "Enter でメニューに進みます"
     }
@@ -912,14 +960,21 @@ try {
         catch {
             Write-Host "`n保存済みプロジェクトを利用できません: $($_.Exception.Message)" -ForegroundColor Yellow
             Write-Host "セットアップ情報を削除して、セットアップをやり直します。" -ForegroundColor Yellow
+
             Remove-Item -LiteralPath $script:SetupMarkerPath -Force
+
             if (-not (Invoke-Setup)) {
                 exit 1
             }
+
             Write-Host ""
             Read-Host "Enter でメニューに進みます"
         }
     }
+
+    # EasyControllerの更新確認
+    Test-ECUpdate
+
     Read-ECMenuChoice
 }
 catch {
