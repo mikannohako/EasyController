@@ -3,16 +3,16 @@
 
 $ErrorActionPreference = "Stop"
 
-$script:DefaultRepositoryUrl = "https://github.com/mikannohako/EasyController.git"
+$script:DefaultRepositoryUrl = "https://github.com/mikannohako/JujutsuController.git"
 $script:ConfigPath = Join-Path $PSScriptRoot "config.ini"
 $script:SetupMarkerPath = Join-Path $PSScriptRoot ".setup-completed"
-$script:EasyControllerVersion = "3.0.0"
-$Host.UI.RawUI.WindowTitle = "EasyController"
+$script:JujutsuControllerVersion = "3.0.0"
+$Host.UI.RawUI.WindowTitle = "JujutsuController"
 
 function Get-ECLatestRelease {
     $release = Invoke-RestMethod `
-        -Uri "https://api.github.com/repos/mikannohako/EasyController/releases/latest" `
-        -Headers @{ "User-Agent" = "EasyController" }
+        -Uri "https://api.github.com/repos/mikannohako/JujutsuController/releases/latest" `
+        -Headers @{ "User-Agent" = "JujutsuController" }
 
     if ($null -eq $release) {
         throw "GitHub APIからリリース情報を取得できませんでした。"
@@ -32,10 +32,10 @@ function Test-ECUpdate {
         $latestVersion = ([string]$release.tag_name).TrimStart("v")
         $latestUrl = [string]$release.html_url
 
-        if ([version]$latestVersion -gt [version]$script:EasyControllerVersion) {
+        if ([version]$latestVersion -gt [version]$script:JujutsuControllerVersion) {
             Write-Host ""
-            Write-Host "新しいEasyControllerがあります。" -ForegroundColor Yellow
-            Write-Host "  現在: $script:EasyControllerVersion" -ForegroundColor Gray
+            Write-Host "新しいJujutsuControllerがあります。" -ForegroundColor Yellow
+            Write-Host "  現在: $script:JujutsuControllerVersion" -ForegroundColor Gray
             Write-Host "  最新: $latestVersion" -ForegroundColor Green
             Write-Host ""
 
@@ -50,7 +50,7 @@ function Test-ECUpdate {
         }
     }
     catch {
-        Write-Host "EasyControllerの更新確認中にエラーが発生しました: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        Write-Host "JujutsuControllerの更新確認中にエラーが発生しました: $($_.Exception.Message)" -ForegroundColor DarkYellow
     }
 }
 
@@ -59,7 +59,7 @@ function Write-ECHeader {
     Write-Host ""
     Write-Host "  Easy Controller" -ForegroundColor Cyan
     Write-Host "  Git / Jujutsu project toolkit" -ForegroundColor DarkCyan
-    Write-Host "  Version $script:EasyControllerVersion" -ForegroundColor DarkGray
+    Write-Host "  Version $script:JujutsuControllerVersion" -ForegroundColor DarkGray
     Write-Host "  $('-' * 42)" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -972,7 +972,7 @@ try {
         }
     }
 
-    # EasyControllerの更新確認
+    # JujutsuControllerの更新確認
     Test-ECUpdate
 
     Read-ECMenuChoice
